@@ -24,6 +24,8 @@
 
 # Some useful settings and functions needed in this configurator
 
+export dialog=dialog
+export WORK_DIR=`dirname $0`
 # Setup for gettext localization
 export TEXTDOMAIN=configure-wifi
 export TEXTDOMAINDIR=/usr/share/locale
@@ -39,20 +41,20 @@ passwordbox() {
     # Returns: text entered by the user
     # Args 1, Instructions for box.
     # args: 2 initial text (optional)
-    dialog --backtitle "$(gettext "Enter text and press enter. Press escape to cancel.")" \
+    $dialog --backtitle "$(gettext "Enter text and press enter. Press escape to cancel.")" \
         --passwordbox "$1" $((lines - 4)) $cols "$2" --stdout
 }
 
 msgbox() {
 # Returns: None
 # Shows the provided message on the screen with an ok button.
-dialog --msgbox "$*" $lines $cols
+$dialog --msgbox "$*" $lines $cols
 }
 
 infobox() {
 # Returns: None
 # Shows the provided message on the screen with no buttons.
-dialog --infobox "$*" $lines $cols
+$dialog --infobox "$*" $lines $cols
 }
 
 menulist() {
@@ -66,9 +68,22 @@ menulist() {
     fi
     ifs="$IFS"
     IFS=$'\n'
-    dialog --backtitle "$(gettext "Use the up and down arrow keys to find the option you want, then press enter to select it. Press escape to cancel.")" \
+    $dialog --backtitle "$(gettext "Use the up and down arrow keys to find the option you want, then press enter to select it. Press escape to cancel.")" \
         --menu "$(gettext "Please select your wireless network")" $((lines - 4)) $cols $optionSize $@ --stdout
     IFS="$ifs"
+}
+
+make_cfg() {
+if test -z $pass; then
+	cat > ${WPA_CFG_FILE} <<-endOfFile
+		network={
+		    ssid="$network"
+		    key_mgmt="NONE"
+		}
+	endOfFile
+else
+	wpa_passphrase "$network" "$pass" | grep -v \#psk > ${WPA_CFG_FILE}
+fi
 }
 
 # Be sure the wireless interface is up.
@@ -79,6 +94,7 @@ infobox "$(gettext "Scanning for available wireless networks ...")"
 ifs=$IFS
 IFS=$'\n'
 for ESSID in $(iwlist wlan0 scan | grep ESSID | cut -d\" -f2); do
+    ESSID=`echo -e ${ESSID}`
 	networks+=("$ESSID")
 	networks+=(" ")
 done
@@ -93,63 +109,32 @@ else
 fi
 test -z "$network" && exit 0
 
-pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
-infobox "$(eval_gettext "Connecting to \${network}...")"
-
-# Create the systemd network file if it doesn't already exist
-mkdir -p /etc/systemd/network
-cat > /etc/systemd/network/wlan0.network <<-endOfFile
-	[Match]
-	Name=wlan0
-		[Network]
-	DHCP=yes
-endOfFile
-
 # Configure wpa_supplicant
-mkdir -p /etc/wpa_supplicant
-cat > /etc/wpa_supplicant/wpa_supplicant-wlan0.conf <<-endOfFile
-	ctrl_interface=/var/run/wpa_supplicant
-	eapol_version=1
-	ap_scan=1
-	fast_reauth=1
-
-	endOfFile
+mkdir -p ${WORK_DIR}/wpa_supplicant
 
 # Combine the network ESSID and password to add a Network section to the wpa_supplicant configuration file with an encrypted password,
 # or if no password is specified, add a Network section with no key management.
-if test -z $pass; then
-	cat >> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf <<-endOfFile
-		network={
-		    ssid="$network"
-		    key_mgmt="NONE"
-		}
-	endOfFile
-else
-	wpa_passphrase "$network" "$pass" | grep -v \#psk >> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+WPA_CFG_FILE=${WORK_DIR}/wpa_supplicant/`echo ${ESSID} | md5sum | cut -d' ' -f1`.conf
+echo $WPA_CFG_FILE
+if [[ ! -r ${WPA_CFG_FILE} ]] ; then
+    pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
+    make_cfg ${WPA_CFG_FILE}
 fi
 
-# Wifi can be a real bear, based on what adapter is being used and driver support.
-# In order to try to ensure that any Linux supported wireless adapter will work, we copy wpa_supplicant@.service from /usr/lib/systemd/system into /etc/systemd/system
-# and modify it to try nl80211 first, and failing that, to try wext. This should be the default wpa_supplicant@.service in any case, since
-# wpa_supplicant@.service and wpa_supplicant-nl80211@.service appear to work, (or not work) in the same way.
-cp /usr/lib/systemd/system/wpa_supplicant@.service /etc/systemd/system
-sed -i /etc/systemd/system/wpa_supplicant@.service -e 's/-c/-Dnl80211,wext -c/'
+infobox "$(eval_gettext "Connecting to \${network}...")"
 
-# Enable networking and wifi related services
-systemctl enable --now systemd-networkd >& /dev/null
-systemctl enable --now wpa_supplicant@wlan0 >& /dev/null
-systemctl enable --now systemd-resolved >& /dev/null
 
-# Don't make any assumptions. Reload wpa_supplicant service in case wifi is being reconfigured.
-systemctl restart wpa_supplicant@wlan0
+killall wpa_supplicant
+wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
 
-# Remove any legacy version of resolv.conf and link the version from systemd-resolved
-rm -f /etc/resolv.conf
-ln -sf /var/run/systemd/resolve/resolv.conf /etc/resolv.conf
+for testconn in {1..3}; do
+    udhcpc -i wlan0
+	sleep 1
+done
 
 # Detect a connection. Timeout after 10 seconds if the connection is not detected.
 for testconn in {1..10}; do
-	ping -c1 google.com >& /dev/null && connected=1 && break
+	ping -c1 g.cn >& /dev/null && connected=1 && break
 	sleep 1
 done
 test $connected && msgbox "$(gettext "Your wireless network connection has been configured and is now working.")" ||msgbox "$(gettext "There was a problem configuring the wireless network. Be sure you selected the correct network, and that your password is correct.")"
