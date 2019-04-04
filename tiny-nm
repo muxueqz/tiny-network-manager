@@ -185,14 +185,12 @@ infobox "$(eval_gettext "Connecting to \${network}...")"
 killall wpa_supplicant
 wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
 
-for testconn in {1..1}; do
-    udhcpc -q -i wlan0
+for testconn in {1..5}; do
+  udhcpc -q -i wlan0
+  gw=$(ip route get 8.8.8.8 | head -n1 | cut -d' ' -f3)
+	ping -c1 $gw >& /dev/null && connected=1 && break
 	sleep 1
 done
 
 # Detect a connection. Timeout after 10 seconds if the connection is not detected.
-for testconn in {1..10}; do
-	ping -c1 g.cn >& /dev/null && connected=1 && break
-	sleep 1
-done
 test $connected && msgbox "$(gettext "Your wireless network connection has been configured and is now working.")" ||msgbox "$(gettext "There was a problem configuring the wireless network. Be sure you selected the correct network, and that your password is correct.")"
