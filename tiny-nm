@@ -167,23 +167,29 @@ else
 fi
 test -z "$network" && exit 0
 
+is_encrypted=${network_map["$n_id#Encryption key"]}
+
 # Configure wpa_supplicant
 mkdir -p ${WORK_DIR}/wpa_supplicant
-
-# Combine the network ESSID and password to add a Network section to the wpa_supplicant configuration file with an encrypted password,
-# or if no password is specified, add a Network section with no key management.
 WPA_CFG_FILE=${WORK_DIR}/wpa_supplicant/`echo ${network} | md5sum | cut -d' ' -f1`.conf
 echo $WPA_CFG_FILE
-if [[ ! -r ${WPA_CFG_FILE} ]] ; then
-    pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
-    make_cfg ${WPA_CFG_FILE}
+
+if [[ $is_encrypted == "off" ]]; then
+  iwconfig wlan0 essid $network
+# Combine the network ESSID and password to add a Network section to the wpa_supplicant configuration file with an encrypted password,
+# or if no password is specified, add a Network section with no key management.
+else
+  if [[ ! -r ${WPA_CFG_FILE} ]] ; then
+      pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
+      make_cfg ${WPA_CFG_FILE}
+  infobox "$(eval_gettext "Connecting to \${network}...")"
+
+
+  killall wpa_supplicant
+  wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
 fi
 
-infobox "$(eval_gettext "Connecting to \${network}...")"
-
-
-killall wpa_supplicant
-wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
+fi
 
 for testconn in {1..5}; do
   udhcpc -q -i wlan0
