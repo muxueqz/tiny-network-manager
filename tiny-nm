@@ -24,7 +24,10 @@
 
 # Some useful settings and functions needed in this configurator
 
-export dialog=dialog
+export dialog=./dialog
+# export dialog=whiptail
+# export TERM=linux
+
 export WORK_DIR=`dirname $0`
 # Setup for gettext localization
 export TEXTDOMAIN=configure-wifi
@@ -73,6 +76,60 @@ menulist() {
     IFS="$ifs"
 }
 
+declare -A network_map
+network_id=0
+get_network_map() {
+  declare -A keys
+  for i in Quality ESSID "Encryption key";do
+    keys["$i"]=1
+  done
+
+  ifs="$IFS"
+  IFS=$'\n'
+  for line in $(iwlist wlan0 scan ); do
+    line=`echo $line | grep -o '[^ ].*:*'`
+    is_quality=`echo $line | grep -c 'Quality='`
+    if [[ $is_quality == 1 ]];then
+      key=`echo $line | cut -d'=' -f1 | sed 's/ //g'`
+      value=`echo $line | cut -d'=' -f2 | cut -d'/' -f1 `
+    else
+      key=`echo $line | cut -d':' -f1 `
+      value=`echo $line | cut -d':' -f2- | cut -d'"' -f2`
+    fi
+    if [[ ${keys["$key"]} == 1 ]] ;then
+      network_map["$network_id#$key"]=$value
+      if [[ ${key} == "ESSID" ]] ; then
+        ESSID=`echo -e $value`
+        network_map["$network_id#$key"]=${ESSID}
+        network_id=`expr $network_id + 1`
+      fi
+    fi
+  done
+  IFS="$ifs"
+  network_id=`expr ${network_id} - 1`
+}
+
+networks=()
+get_networks() {
+
+  network_quality=()
+  for i in `seq 0 ${network_id}`;do
+      quality=${network_map["$i#Quality"]}
+      network_quality+=("$i,${quality}")
+  done
+
+  IFS=$'\n' sorted=($(sort -r -t',' -k2 <<<"${network_quality[*]}"))
+  unset IFS
+
+  for key in "${!sorted[@]}";do
+    wifi_id=`echo ${sorted["$key"]} | cut -d',' -f1`
+    essid=${network_map["$wifi_id#ESSID"]}
+    quality=${network_map["$wifi_id#Quality"]}
+    networks+=("$key")
+    networks+=("${essid} ${quality}")
+  done
+}
+
 make_cfg() {
 if test -z $pass; then
 	cat > ${WPA_CFG_FILE} <<-endOfFile
@@ -91,21 +148,18 @@ ip link set up dev wlan0
 
 # Scan for available wifi networks and store them in an array.
 infobox "$(gettext "Scanning for available wireless networks ...")"
-ifs=$IFS
-IFS=$'\n'
-for ESSID in $(iwlist wlan0 scan | grep ESSID | cut -d\" -f2); do
-    ESSID=`echo -e ${ESSID}`
-	networks+=("$ESSID")
-	networks+=(" ")
-done
-IFS=$ifs
+
+get_network_map
+get_networks
 
 # Present the available networks in a selectable menu, only if networks can be found
 if test -z "$networks"; then
 	msgbox "$(gettext "Unable to get a list of networks. Either you have no wireless networks in range or there is a problem with your wireless adapter.")"
 	exit 0
 else
-	network="$(menulist "${networks[@]}")"
+	echo "${networks[@]}"
+	n_id="$(menulist "${networks[@]}")"
+  network=${network_map["$n_id#ESSID"]}
 fi
 test -z "$network" && exit 0
 
@@ -114,7 +168,7 @@ mkdir -p ${WORK_DIR}/wpa_supplicant
 
 # Combine the network ESSID and password to add a Network section to the wpa_supplicant configuration file with an encrypted password,
 # or if no password is specified, add a Network section with no key management.
-WPA_CFG_FILE=${WORK_DIR}/wpa_supplicant/`echo ${ESSID} | md5sum | cut -d' ' -f1`.conf
+WPA_CFG_FILE=${WORK_DIR}/wpa_supplicant/`echo ${network} | md5sum | cut -d' ' -f1`.conf
 echo $WPA_CFG_FILE
 if [[ ! -r ${WPA_CFG_FILE} ]] ; then
     pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
@@ -127,8 +181,8 @@ infobox "$(eval_gettext "Connecting to \${network}...")"
 killall wpa_supplicant
 wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
 
-for testconn in {1..3}; do
-    udhcpc -i wlan0
+for testconn in {1..1}; do
+    udhcpc -q -i wlan0
 	sleep 1
 done
 
