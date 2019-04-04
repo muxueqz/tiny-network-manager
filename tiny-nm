@@ -24,9 +24,10 @@
 
 # Some useful settings and functions needed in this configurator
 
-export dialog=./dialog
-# export dialog=whiptail
-# export TERM=linux
+# export dialog=./dialog
+export dialog=whiptail
+export TERM=linux
+echo $TERM
 
 export WORK_DIR=`dirname $0`
 # Setup for gettext localization
@@ -45,25 +46,25 @@ passwordbox() {
     # Args 1, Instructions for box.
     # args: 2 initial text (optional)
     $dialog --backtitle "$(gettext "Enter text and press enter. Press escape to cancel.")" \
-        --passwordbox "$1" $((lines - 4)) $cols "$2" --stdout
+        --passwordbox "$1" $((lines - 4)) $cols "$2" 3>&1 1>&2 2>&3
 }
 
 msgbox() {
 # Returns: None
 # Shows the provided message on the screen with an ok button.
-$dialog --msgbox "$*" $lines $cols
+$dialog --msgbox "$*" $lines $cols 3>&1 1>&2 2>&3
 }
 
 infobox() {
 # Returns: None
 # Shows the provided message on the screen with no buttons.
-$dialog --infobox "$*" $lines $cols
+$dialog --infobox "$*" $lines $cols 3>&1 1>&2 2>&3
 }
 
 menulist() {
     # Args: minimum group 2, multiples of 2, "tag" "choice"
     # returns: selected tag
-      local menuList
+    local menuList
     if [[ $((${#@} / 2)) -gt $((lines - 5)) ]]; then
         local optionSize=$((lines - 5))
     else
@@ -72,7 +73,9 @@ menulist() {
     ifs="$IFS"
     IFS=$'\n'
     $dialog --backtitle "$(gettext "Use the up and down arrow keys to find the option you want, then press enter to select it. Press escape to cancel.")" \
-        --menu "$(gettext "Please select your wireless network")" $((lines - 4)) $cols $optionSize $@ --stdout
+        --menu "$(gettext "Please select your wireless network")" $((lines - 4)) $cols $optionSize $@ \
+         3>&1 1>&2 2>&3
+
     IFS="$ifs"
 }
 
@@ -149,6 +152,7 @@ ip link set up dev wlan0
 # Scan for available wifi networks and store them in an array.
 infobox "$(gettext "Scanning for available wireless networks ...")"
 
+
 get_network_map
 get_networks
 
@@ -158,7 +162,7 @@ if test -z "$networks"; then
 	exit 0
 else
 	echo "${networks[@]}"
-	n_id="$(menulist "${networks[@]}")"
+  n_id="$(menulist "${networks[@]}")"
   network=${network_map["$n_id#ESSID"]}
 fi
 test -z "$network" && exit 0
