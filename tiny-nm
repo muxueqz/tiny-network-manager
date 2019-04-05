@@ -182,12 +182,11 @@ else
   if [[ ! -r ${WPA_CFG_FILE} ]] ; then
       pass="$(passwordbox "$(eval_gettext "Enter the password for \${network}. Just press the enter key if \$network is unsecured.")")" || exit 0
       make_cfg ${WPA_CFG_FILE}
+  fi
   infobox "$(eval_gettext "Connecting to \${network}...")"
-
 
   killall wpa_supplicant
   wpa_supplicant -i wlan0 -c ${WPA_CFG_FILE} -B
-fi
 
 fi
 
