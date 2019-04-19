@@ -128,7 +128,7 @@ get_networks() {
     wifi_id=`echo ${sorted["$key"]} | cut -d',' -f1`
     essid=${network_map["$wifi_id#ESSID"]}
     quality=${network_map["$wifi_id#Quality"]}
-    networks+=("$key")
+    networks+=("$wifi_id")
     networks+=("${essid} ${quality}")
   done
 }
