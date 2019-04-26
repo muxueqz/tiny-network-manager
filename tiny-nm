@@ -191,7 +191,14 @@ else
 fi
 
 for testconn in {1..5}; do
-  udhcpc -q -i wlan0
+  iface=wlan0
+  udhcp_pidfile=/run/udhcpc.${iface}.pid
+  if test -f ${udhcp_pidfile}; then
+    kill -USR2 $(/bin/cat ${udhcp_pidfile}); 
+    kill -TERM $(/bin/cat ${udhcp_pidfile}); 
+  fi
+  udhcpc -p ${udhcp_pidfile} -i wlan0
+
   gw=$(ip route get 8.8.8.8 | head -n1 | cut -d' ' -f3)
 	ping -c1 $gw >& /dev/null && connected=1 && break
 	sleep 1
