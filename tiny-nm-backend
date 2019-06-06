@@ -1,0 +1,108 @@
+#!/bin/bash
+# configure-wifi
+#
+# Copyright 2018, F123 Consulting, <information@f123.org>
+# Copyright 2018, Kyle, <kyle@free2.ml>
+# Copyright 2018, Storm Dragon, <storm_dragon@linux-a11y.org>
+#
+# This is free software; you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 3, or (at your option) any later
+# version.
+#
+# This software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this package; see the file COPYING.  If not, write to the Free
+# Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+#
+#--code--
+
+# Some useful settings and functions needed in this configurator
+
+# export dialog=./dialog
+export WORK_DIR=`dirname $0`
+# Setup for gettext localization
+export TEXTDOMAIN=configure-wifi
+export TEXTDOMAINDIR=/usr/share/locale
+. gettext.sh
+
+declare -A network_map
+network_id=0
+get_network_map() {
+  declare -A keys
+  for i in Quality ESSID "Encryption key";do
+    keys["$i"]=1
+  done
+
+  ifs="$IFS"
+  IFS=$'\n'
+  for line in $(iwlist wlan0 scan ); do
+    line=`echo $line | grep -o '[^ ].*:*'`
+    is_quality=`echo $line | grep -c 'Quality='`
+    if [[ $is_quality == 1 ]];then
+      key=`echo $line | cut -d'=' -f1 | sed 's/ //g'`
+      value=`echo $line | cut -d'=' -f2 | cut -d'/' -f1 `
+    else
+      key=`echo $line | cut -d':' -f1 `
+      value=`echo $line | cut -d':' -f2- | cut -d'"' -f2`
+    fi
+    if [[ ${keys["$key"]} == 1 ]] ;then
+      network_map["$network_id#$key"]=$value
+      if [[ ${key} == "ESSID" ]] ; then
+        ESSID=`echo -e $value`
+        network_map["$network_id#$key"]=${ESSID}
+        network_id=`expr $network_id + 1`
+      fi
+    fi
+  done
+  IFS="$ifs"
+  network_id=`expr ${network_id} - 1`
+}
+
+networks=()
+get_networks() {
+
+  network_quality=()
+  for i in `seq 0 ${network_id}`;do
+      quality=${network_map["$i#Quality"]}
+      network_quality+=("$i,${quality}")
+  done
+
+  IFS=$'\n' sorted=($(sort -r -t',' -k2 <<<"${network_quality[*]}"))
+  unset IFS
+
+  for key in "${!sorted[@]}";do
+    wifi_id=`echo ${sorted["$key"]} | cut -d',' -f1`
+    essid=${network_map["$wifi_id#ESSID"]}
+    quality=${network_map["$wifi_id#Quality"]}
+    networks+=("$wifi_id ${essid} ${quality}")
+  done
+}
+
+make_cfg() {
+if test -z $pass; then
+	cat > ${WPA_CFG_FILE} <<-endOfFile
+		network={
+		    ssid="$network"
+		    key_mgmt="NONE"
+		}
+	endOfFile
+else
+	wpa_passphrase "$network" "$pass" | grep -v \#psk > ${WPA_CFG_FILE}
+fi
+}
+
+# Be sure the wireless interface is up.
+ip link set up dev wlan0
+
+# Scan for available wifi networks and store them in an array.
+
+get_network_map
+get_networks
+
+declare -p networks network_map > networks.data
